@@ -65,6 +65,75 @@ def add_open_question(domain: str, question: str) -> None:
 # ---------------------------------------------------------------------------
 # Fact merging (core logic)
 # ---------------------------------------------------------------------------
+# Pricing contradiction pre-filters (deterministic — no Claude call)
+# ---------------------------------------------------------------------------
+
+_PLAN_TIERS = {
+    "free", "starter", "basic", "pro", "professional", "business",
+    "enterprise", "team", "plus", "premium", "growth", "scale",
+}
+
+_GENERIC_PRICING_PHRASES = (
+    "no pricing", "pricing not", "contact sales", "custom pricing",
+    "pricing unavailable", "pricing unknown", "not disclosed",
+    "pricing information", "pricing page",
+)
+
+_PRICE_INDICATORS = (
+    "$", "per month", "per user", "/mo", "/month", "annually",
+    "per year", "/year", "usd", "price is", "priced at", "charges",
+)
+
+_AVAILABILITY_INDICATORS = (
+    "no pricing", "pricing not", "not disclosed", "contact sales",
+    "custom pricing", "not listed", "not public", "not available",
+    "gated", "not found", "unknown",
+)
+
+
+def _extract_pricing_subject(claim: str) -> str | None:
+    """Return the plan tier name, 'generic_pricing', or None if undetermined."""
+    lower = claim.lower()
+    words = set(lower.split())
+    for tier in _PLAN_TIERS:
+        if tier in words or f"{tier} plan" in lower or f"{tier} tier" in lower:
+            return tier
+    for phrase in _GENERIC_PRICING_PHRASES:
+        if phrase in lower:
+            return "generic_pricing"
+    return None
+
+
+def _pricing_claim_type(claim: str) -> str:
+    """Return 'price', 'availability', or 'other'."""
+    lower = claim.lower()
+    for ind in _PRICE_INDICATORS:
+        if ind in lower:
+            return "price"
+    for ind in _AVAILABILITY_INDICATORS:
+        if ind in lower:
+            return "availability"
+    return "other"
+
+
+def _should_check_pricing_contradiction(claim_a: str, claim_b: str) -> bool:
+    """
+    Return True only when both claims refer to the same pricing subject
+    and the same claim type (price or availability).
+    Identical claims are never contradictions.
+    """
+    if claim_a.strip().lower() == claim_b.strip().lower():
+        return False
+    subject_a = _extract_pricing_subject(claim_a)
+    subject_b = _extract_pricing_subject(claim_b)
+    if subject_a is None or subject_b is None or subject_a != subject_b:
+        return False
+    type_a = _pricing_claim_type(claim_a)
+    type_b = _pricing_claim_type(claim_b)
+    return type_a == type_b and type_a != "other"
+
+
+# ---------------------------------------------------------------------------
 
 def merge_fact(
     domain: str,
@@ -99,14 +168,18 @@ def merge_fact(
 
     conflicts_resolved: list[dict] = []
 
-    if contradiction_checker:
+    if contradiction_checker and domain == "pricing":
         for existing in data["facts"]:
             if existing["superseded"]:
                 continue
-            if not _keyword_overlap(claim, existing["claim"]):
+            if not _should_check_pricing_contradiction(claim, existing["claim"]):
                 continue
 
+            print(f"[knowledge] checking contradiction:")
+            print(f"  new     : {claim[:80]}")
+            print(f"  existing: {existing['claim'][:80]}")
             result = contradiction_checker(claim, existing["claim"])
+            print(f"[knowledge] contradiction result: {result}")
             if not result.get("contradicts"):
                 continue
 
@@ -120,7 +193,15 @@ def merge_fact(
                 "confidence_after": CONFLICT_CONFIDENCE_CAP,
             })
 
-    data["facts"].append(new_fact)
+    # Skip if an active fact with the same normalized claim already exists
+    normalized_new = _normalize_claim(claim)
+    is_duplicate = any(
+        _normalize_claim(f["claim"]) == normalized_new
+        for f in data["facts"]
+        if not f.get("superseded")
+    )
+    if not is_duplicate:
+        data["facts"].append(new_fact)
     save_domain(domain, data)
 
     return {"fact": new_fact, "conflicts_resolved": conflicts_resolved}
@@ -139,7 +220,7 @@ def load_facts_for_retrieval(domains: list[str]) -> list[dict]:
     for domain in domains:
         data = load_domain(domain)
         for fact in data["facts"]:
-            if not fact.get("superseded"):
+            if not fact.get("superseded") and fact.get("confidence", 0) > 0:
                 facts.append({**fact, "domain": domain})
     facts.sort(key=lambda f: f["confidence"], reverse=True)
     return facts
@@ -163,6 +244,11 @@ def load_source(source_id: str) -> Optional[dict]:
 # ---------------------------------------------------------------------------
 # Private helpers
 # ---------------------------------------------------------------------------
+
+def _normalize_claim(claim: str) -> str:
+    """Lowercase and collapse whitespace for duplicate detection."""
+    return " ".join(claim.lower().split())
+
 
 _STOPWORDS = {
     "a", "an", "the", "is", "are", "was", "were", "be", "been", "being",

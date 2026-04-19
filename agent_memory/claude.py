@@ -121,12 +121,15 @@ def answer_question(context: list[dict], history: list[dict], query: str) -> str
 
     Returns a plain text answer. No JSON parsing — raw response is the answer.
     """
-    # Format knowledge context
+    # Format knowledge context, tagging conversation-sourced facts explicitly
     if context:
-        lines = [
-            f"[{f['domain']}] ({f['confidence']:.0%} confidence) {f['claim']}"
-            for f in context
-        ]
+        lines = []
+        for f in context:
+            is_conversation = f.get("quality_tier") == "conversation"
+            tag = " [user-provided]" if is_conversation else ""
+            lines.append(
+                f"[{f['domain']}] ({f['confidence']:.0%} confidence){tag} {f['claim']}"
+            )
         knowledge_block = "Relevant company knowledge:\n" + "\n".join(lines)
     else:
         knowledge_block = "No relevant knowledge found in memory for this question."
@@ -144,6 +147,10 @@ def answer_question(context: list[dict], history: list[dict], query: str) -> str
         "You are a company knowledge assistant answering questions strictly from the "
         "provided knowledge. Cite the source domain in brackets (e.g. [pricing]) when "
         "using a fact. If a fact's confidence is below 70%, flag it as uncertain. "
+        "Facts marked [user-provided] came from user assertions during conversation, "
+        "not from verified sources — surface them but label them as unverified. "
+        "If a [user-provided] fact conflicts with a verified fact, note both and "
+        "state clearly which source each came from. "
         "Say \"I don't know\" if the knowledge base has no relevant information — "
         "do not speculate beyond what is provided."
     )

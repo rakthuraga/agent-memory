@@ -30,7 +30,7 @@ _HIGH_SIGNAL = {
     "platform", "how-it-works", "why",
 }
 
-_MAX_PAGES = 12
+_MAX_PAGES = 4
 _REQUEST_TIMEOUT = 8
 _MAX_CHARS_PER_PAGE = 6000
 
@@ -242,7 +242,10 @@ def _process_pages(pages: list[dict], source_id: str) -> tuple[list[dict], list[
     facts_added = 0
 
     for page in pages:
+        url_or_label = page["url"]
+        print(f"[ingest]   extracting facts from {url_or_label}...")
         extracted = claude.extract_facts(page["text"], source_type=page["quality_tier"])
+        print(f"[ingest]   extracted {len(extracted)} facts from {url_or_label}")
         if not extracted:
             continue
 
