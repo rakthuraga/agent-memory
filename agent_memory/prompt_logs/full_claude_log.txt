@@ -1,0 +1,9 @@
+Full Claude Code session log for the Agent Memory take-home project.
+
+The complete conversation transcript with Claude Code (claude-sonnet-4-6) is
+captured in the file ~/claude_session_1.txt recorded during this session.
+
+This file is a placeholder confirming that prompt logging was set up.
+The actual session transcript was recorded via the `script` command and
+covers the full design and implementation conversation from architecture
+through final submission.
